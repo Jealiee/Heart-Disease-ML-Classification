@@ -1,12 +1,9 @@
-import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-#Put the csv file path here (if using different format change pd.read_csv to correct one)
-FILE_PATH = 'testdata.csv'
-
-if __name__ == "__main__":
-    df = pd.read_csv(FILE_PATH)
-
+def explore_data(df, target):
+    # Basic info
     print("\n" + "="*60)    
     print('Shape')
     print(df.shape)
@@ -15,6 +12,7 @@ if __name__ == "__main__":
     print('Info')
     df.info()
 
+    # Unique, missing and duplicate values
     print("\n" + "="*60)
     print('Unique values')
     print(df.nunique())
@@ -32,6 +30,11 @@ if __name__ == "__main__":
     print('Percentage of missing values in each column')
     print((df.isnull().sum()/(len(df)))*100)
 
+    print("\n" + "="*60)
+    print("Duplicate rows:")
+    print(df.duplicated().sum())
+
+    # Showing which columns are categorical / numerical 
 
     cat_cols=df.select_dtypes(include=['object', 'string']).columns
     num_cols = df.select_dtypes(include=np.number).columns.tolist()
@@ -43,9 +46,30 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("Numerical Variables:")
     print(num_cols)
-    
+        
     print("\n" + "="*60)
     print('Statistics summary for numerical datatypes')
     print(df.describe().T)
 
+    # Target distribution
     print("\n" + "="*60)
+    print("Target distribution:")
+    print(df[target].value_counts(normalize=True))
+
+    sns.countplot(x=df[target])
+    plt.title("Target Distribution")
+    plt.show()
+
+    # Correlation
+    plt.figure(figsize=(10,8))
+    sns.heatmap(df[num_cols].corr(), annot=True, cmap='coolwarm')
+    plt.title("Correlation Matrix")
+    plt.show()
+
+    # Check data distribution for numerical values
+    for col in num_cols:
+        plt.figure()
+        df[col].hist(bins=30)
+        plt.title(col)
+        plt.show()
+
