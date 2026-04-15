@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 
 def preprocessed_data(df):
     # Drop useless or high-missing columns
@@ -13,6 +14,9 @@ def preprocessed_data(df):
     num_cols = ['age', 'trestbps', 'chol', 'thalch', 'oldpeak']
     for col in num_cols:
         df[col].fillna(df[col].median(), inplace=True)
+
+    # coding (features to 0/1)
+    df['sex'] = df['sex'].map({'M': 1, 'F': 0})
 
     # 4. Fill categorical columns with MODE - that is a maybe can mess with the results and data
     # cat_cols = ['sex', 'dataset', 'cp', 'fbs', 'restecg', 'exang', 'slope']
