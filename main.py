@@ -10,7 +10,9 @@ FILE_PATH = Path("heart_disease_uci.csv")
 df = pd.read_csv(FILE_PATH)
 
 if __name__ == "__main__":
-    preprocessed_data(df)
-    explore_data(df, target ='num')
-    run_model(df)
-
+    df_full = preprocessed_data(df)
+    df_cleveland = preprocessed_data(df, only_cleveland=True)
+    ## choose one
+    #explore_data(df_full, target='num')  # raw
+    explore_data(df_cleveland, target='num')  # filtered
+    # run_model(df)
