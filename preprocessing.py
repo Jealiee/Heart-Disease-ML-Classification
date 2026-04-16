@@ -1,32 +1,31 @@
 import numpy as np
+
+# Setting only_cleaveland as true removes ~60% of the data but all features are preserved. 
+# Default value =false deletes 3 features with >30% missing data.
 def preprocessed_data(df, only_cleveland=False):
 
     df = df.copy()
 
-    # Optional filtering
     if only_cleveland:
-        df = df[df['dataset'] == 'Cleveland'].reset_index(drop=True)
-        # drop only id
-        df = df.drop(columns=['id'])
+        df = df[df["dataset"] == "Cleveland"].reset_index(drop=True)
 
-        # encode sex
-        df['sex'] = df['sex'].map({'Male': 1, 'Female': 0})
+        #TODO: normalize columns ca, thal and slope
 
-        return df
+    else:
+        df = df.drop(columns=["ca", "thal", "slope"])
 
-    # Drop columns
-    df = df.drop(columns=['id', 'ca', 'thal', 'slope'])
+    df = df.drop(columns=["id", "dataset"])
 
-    # Fix values
-    df['trestbps'] = df['trestbps'].replace(0, np.nan)
-    df['chol'] = df['chol'].replace(0, np.nan)
+    # Lablel invalid values as missing
+    df["trestbps"] = df["trestbps"].replace(0, np.nan)
+    df["chol"] = df["chol"].replace(0, np.nan)
 
-    # Fill numerical
-    num_cols = ['age', 'trestbps', 'chol', 'thalch', 'oldpeak']
+    # Replace missing numerical values with median
+    num_cols = ["age", "trestbps", "chol", "thalch", "oldpeak"]
     for col in num_cols:
         df[col].fillna(df[col].median(), inplace=True)
 
-    # Encode
-    df['sex'] = df['sex'].map({'Male': 1, 'Female': 0})
+    #TODO: Finish normalization
+    df["sex"] = df["sex"].map({"Male": 1, "Female": 0})
 
     return df
