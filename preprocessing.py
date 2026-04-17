@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import pandas as pd
 
 
@@ -50,14 +50,18 @@ def preprocess_fold(X_train, X_val):
     cat_cols = [c for c in cat_cols if c in X_train_processed.columns]
 
     # Imputing missing boolean values with most frequent class
-    fbs_mode = X_train["fbs"].mode()[0]
-    exang_mode = X_train["exang"].mode()[0]
+    fbs_mode = X_train_processed["fbs"].mode()[0]
+    exang_mode = X_train_processed["exang"].mode()[0]
 
     X_train_processed["fbs"] = X_train_processed["fbs"].fillna(fbs_mode)
     X_train_processed["exang"] = X_train_processed["exang"].fillna(exang_mode)
 
     X_val_processed["fbs"] = X_val_processed["fbs"].fillna(fbs_mode)
     X_val_processed["exang"] = X_val_processed["exang"].fillna(exang_mode)
+
+    # Handle missing categorical variables -> fill them in as missing
+    X_train_processed[cat_cols] = X_train_processed[cat_cols].fillna("missing")
+    X_val_processed[cat_cols] = X_val_processed[cat_cols].fillna("missing")
 
     # Encode nominal categorical variables
     encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
@@ -89,6 +93,10 @@ def preprocess_fold(X_train, X_val):
         X_train_processed[col] = X_train_processed[col].fillna(median)
         X_val_processed[col] = X_val_processed[col].fillna(median)
 
-    # TODO: Scale numerical values
+    # Scale numerical values
+    scaler = StandardScaler()
+
+    X_train_processed[num_cols] = scaler.fit_transform(X_train_processed[num_cols])
+    X_val_processed[num_cols] = scaler.transform(X_val_processed[num_cols])
 
     return X_train_processed, X_val_processed
