@@ -3,7 +3,7 @@ import numpy as np
 
 # Setting only_cleaveland as true removes ~60% of the data but all features are preserved.
 # Default value =false deletes 3 features with >30% missing data.
-def preprocessed_data(df, target, only_cleveland=False):
+def clean_data(df, target, only_cleveland=False):
 
     df = df.copy()
 
@@ -21,12 +21,6 @@ def preprocessed_data(df, target, only_cleveland=False):
     df["trestbps"] = df["trestbps"].replace(0, np.nan)
     df["chol"] = df["chol"].replace(0, np.nan)
 
-    # !!! MOVE TO SEP FUNCTION - DATA LEAKAGE RISK
-    # Replace missing numerical values with median
-    num_cols = df.select_dtypes(include=np.number).columns.tolist()
-    for col in num_cols:
-        df[col] = df[col].fillna(df[col].median())
-
     # Encoding boolean / binary values
     df["sex"] = (
         df["sex"].astype(str).str.strip().str.lower().map({"male": 1, "female": 0})
@@ -38,15 +32,38 @@ def preprocessed_data(df, target, only_cleveland=False):
         df["exang"].astype(str).str.strip().str.lower().map({"true": 1, "false": 0})
     )
 
-    # !!! MOVE TO SEP FUNCTION - DATA LEAKAGE RISK
-    # Imputing missing boolean values with most frequent class
-    df["fbs"] = df["fbs"].fillna(df["fbs"].mode()[0])
-    df["exang"] = df["exang"].fillna(df["exang"].mode()[0])
-
     # Depending on method may have to move
     # TODO: Handle nominal categorical variables
 
-    # !!! MOVE TO SEP FUNCTION - DATA LEAKAGE RISK
+    return df
+
+def preprocess_fold (X_train, X_val):
+
+    X_train_processed = X_train.copy()
+    X_val_processed = X_val.copy()
+
+    binary_cols = ["sex", "fbs", "exang"]
+
+    num_cols = [
+        col for col in X_train.select_dtypes(include=np.number).columns
+        if col not in binary_cols
+    ]
+
+    # Imputing missing boolean values with most frequent class
+    X_train_processed["fbs"] = X_train["fbs"].fillna(X_train["fbs"].mode()[0])
+    X_train_processed["exang"] = X_train["exang"].fillna(X_train["exang"].mode()[0])
+
+    X_val_processed["fbs"] = X_val["fbs"].fillna(X_train["fbs"].mode()[0])
+    X_val_processed["exang"] = X_val["exang"].fillna(X_train["exang"].mode()[0])
+
     # TODO: Scale numerical values
 
-    return df
+    
+    # Replace missing numerical values with median
+    for col in num_cols:
+        median = X_train[col].median()
+        X_train_processed[col] = X_train[col].fillna(median)
+        X_val_processed[col] = X_val[col].fillna(median)
+
+
+    return X_train_processed, X_val_processed
