@@ -1,14 +1,15 @@
 import numpy as np
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder
 import pandas as pd
+from sklearn.preprocessing import RobustScaler
 
 
 # Setting only_cleaveland as true removes ~60% of the data but all features are preserved.
 # Default value =false deletes 3 features with >30% missing data.
-def clean_data(df, only_cleveland=False):
+def clean_data(df,only_cleveland=False):
 
     df = df.copy()
-
+    df = df.drop_duplicates()
     if only_cleveland:
         df = df[df["dataset"] == "Cleveland"].reset_index(drop=True)
 
@@ -31,6 +32,23 @@ def clean_data(df, only_cleveland=False):
     df["exang"] = (
         df["exang"].astype(str).str.strip().str.lower().map({"true": 1, "false": 0})
     )
+    cols_to_fix = ['trestbps', 'chol', 'oldpeak']
+
+    for col in cols_to_fix:
+        q1 = df[col].quantile(0.25)
+        q3 = df[col].quantile(0.75)
+        iqr = q3 - q1
+        upper_limit = q3 + 1.5 * iqr
+        lower_limit = q1 - 1.5 * iqr
+
+        # Cap the values
+        df[col] = np.where(df[col] > upper_limit, upper_limit,
+                           np.where(df[col] < lower_limit, lower_limit, df[col]))
+
+    # Fill missing numerical values with the median
+    numerical_cols = ['trestbps', 'chol', 'thalch', 'oldpeak']
+    for col in numerical_cols:
+        df[col] = df[col].fillna(df[col].median())
 
     return df
 
@@ -50,18 +68,14 @@ def preprocess_fold(X_train, X_val):
     cat_cols = [c for c in cat_cols if c in X_train_processed.columns]
 
     # Imputing missing boolean values with most frequent class
-    fbs_mode = X_train_processed["fbs"].mode()[0]
-    exang_mode = X_train_processed["exang"].mode()[0]
+    fbs_mode = X_train["fbs"].mode()[0]
+    exang_mode = X_train["exang"].mode()[0]
 
     X_train_processed["fbs"] = X_train_processed["fbs"].fillna(fbs_mode)
     X_train_processed["exang"] = X_train_processed["exang"].fillna(exang_mode)
 
     X_val_processed["fbs"] = X_val_processed["fbs"].fillna(fbs_mode)
     X_val_processed["exang"] = X_val_processed["exang"].fillna(exang_mode)
-
-    # Handle missing categorical variables -> fill them in as missing
-    X_train_processed[cat_cols] = X_train_processed[cat_cols].fillna("missing")
-    X_val_processed[cat_cols] = X_val_processed[cat_cols].fillna("missing")
 
     # Encode nominal categorical variables
     encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
@@ -93,9 +107,8 @@ def preprocess_fold(X_train, X_val):
         X_train_processed[col] = X_train_processed[col].fillna(median)
         X_val_processed[col] = X_val_processed[col].fillna(median)
 
-    # Scale numerical values
-    scaler = StandardScaler()
-
+    # TODO: Scale numerical values
+    scaler = RobustScaler()
     X_train_processed[num_cols] = scaler.fit_transform(X_train_processed[num_cols])
     X_val_processed[num_cols] = scaler.transform(X_val_processed[num_cols])
 
