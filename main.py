@@ -11,8 +11,8 @@ df = pd.read_csv(FILE_PATH)
 target = "num"
 
 if __name__ == "__main__":
-    #df_full = clean_data(df, target)
-    df_cleveland = clean_data(df, target, only_cleveland=True)
+    #df_full = clean_data(df)
+    df_cleveland = clean_data(df, only_cleveland=True)
     ## choose one
     explore_data(df_cleveland, target)
     # explore_data(df_full, target)  # raw

@@ -5,7 +5,7 @@ import pandas as pd
 
 # Setting only_cleaveland as true removes ~60% of the data but all features are preserved.
 # Default value =false deletes 3 features with >30% missing data.
-def clean_data(df, target, only_cleveland=False):
+def clean_data(df, only_cleveland=False):
 
     df = df.copy()
 
