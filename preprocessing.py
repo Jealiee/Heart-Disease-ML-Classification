@@ -107,7 +107,7 @@ def preprocess_fold(X_train, X_val):
         X_train_processed[col] = X_train_processed[col].fillna(median)
         X_val_processed[col] = X_val_processed[col].fillna(median)
 
-    # TODO: Scale numerical values
+    # Scale numerical values
     scaler = RobustScaler()
     X_train_processed[num_cols] = scaler.fit_transform(X_train_processed[num_cols])
     X_val_processed[num_cols] = scaler.transform(X_val_processed[num_cols])
