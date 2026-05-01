@@ -79,7 +79,7 @@ def explore_data(df, target):
     # TODO: Fix the visual (overlapping graphs) -> low prio
     # Outliers
     n_cols = len(num_cols)
-    fig, axes = plt.subplots(n_cols, 2, figsize=(12, n_cols * 4))
+    fig, axes = plt.subplots(n_cols, 2, figsize=(12, n_cols * 4), squeeze=False)
 
     for i, col in enumerate(num_cols):
         # Histogram with KDE (Center and Shape)
