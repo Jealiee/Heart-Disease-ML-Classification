@@ -50,6 +50,8 @@ def clean_data(df,only_cleveland=False):
     for col in numerical_cols:
         df[col] = df[col].fillna(df[col].median())
 
+    df["num"] = (df["num"] > 0).astype(int)
+
     return df
 
 
