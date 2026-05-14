@@ -34,14 +34,16 @@ def logistic_model():
         max_iter=2000,
         C=1.0,
         solver="liblinear",
-        random_state=42
+        random_state=42,
+        class_weight="balanced"
     )
 
 def decision_tree():
     return DecisionTreeClassifier(
         max_depth=8,
         min_samples_split=10,
-        random_state=42
+        random_state=42,
+        class_weight="balanced"
     )
 
 def random_forest():
@@ -49,5 +51,6 @@ def random_forest():
         n_estimators=200,
         max_depth=None,
         min_samples_split=5,
-        random_state=42
+        random_state=42,
+        class_weight="balanced"
     )
