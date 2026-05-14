@@ -21,7 +21,8 @@ def clean_data(df,only_cleveland=False):
     # Lablel invalid values as missing
     df["trestbps"] = df["trestbps"].replace(0, np.nan)
     df["chol"] = df["chol"].replace(0, np.nan)
-
+    df["oldpeak"] = df["oldpeak"].clip(lower=0)
+    
     # Encoding boolean / binary values
     df["sex"] = (
         df["sex"].astype(str).str.strip().str.lower().map({"male": 1, "female": 0})
@@ -32,7 +33,7 @@ def clean_data(df,only_cleveland=False):
     df["exang"] = (
         df["exang"].astype(str).str.strip().str.lower().map({"true": 1, "false": 0})
     )
-    cols_to_fix = ['trestbps', 'chol', 'oldpeak']
+    cols_to_fix = ['trestbps', 'chol']
 
     for col in cols_to_fix:
         q1 = df[col].quantile(0.25)
