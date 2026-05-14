@@ -63,8 +63,8 @@ def explore_data(df, target):
 
     # Correlation
     plt.figure(figsize=(10, 8))
-    sns.heatmap(df[num_cols].corr(), annot=True, cmap="coolwarm")
-    plt.title("Correlation Matrix")
+    sns.heatmap(df[num_cols].corr(method="spearman"), annot=True, cmap="coolwarm")
+    plt.title("Spearman Correlation Matrix")
     plt.show()
 
     # Check data distribution for numerical values
@@ -92,5 +92,4 @@ def explore_data(df, target):
 
     plt.tight_layout()
     plt.show()
-
 
