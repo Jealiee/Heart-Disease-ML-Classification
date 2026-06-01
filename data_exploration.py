@@ -1,6 +1,7 @@
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import pandas as pd
 
 
 def explore_data(df, target):
@@ -55,8 +56,8 @@ def explore_data(df, target):
     # Target distribution
     print("\n" + "=" * 60)
     print("Target distribution:")
-    print(df[target].value_counts(normalize=True))
-
+    print(df[target].value_counts(normalize=True) * 100)
+    
     sns.countplot(x=df[target])
     plt.title("Target Distribution")
     plt.show()
@@ -76,7 +77,6 @@ def explore_data(df, target):
         plt.title(col)
         plt.show()
 
-    # TODO: Fix the visual (overlapping graphs) -> low prio
     # Outliers
     n_cols = len(num_cols)
     fig, axes = plt.subplots(n_cols, 2, figsize=(12, n_cols * 4), squeeze=False)
@@ -93,3 +93,6 @@ def explore_data(df, target):
     plt.tight_layout()
     plt.show()
 
+if __name__ == '__main__':
+    df = pd.read_csv("heart_disease_uci.csv")
+    explore_data(df, 'num')
