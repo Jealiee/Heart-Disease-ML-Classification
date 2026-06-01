@@ -31,6 +31,13 @@ def explore_data(df, target):
     print("\n" + "=" * 60)
     print("Percentage of missing values in each column")
     print((df.isnull().sum() / (len(df))) * 100)
+    
+    total_missing = df.isnull().sum().sum()
+    total_values = df.shape[0] * df.shape[1]
+    overall_missing_pct = (total_missing / total_values) * 100
+
+    print("\n" + "=" * 60)
+    print(f"Overall missing values: {overall_missing_pct:.2f}%")
 
     print("\n" + "=" * 60)
     print("Duplicate rows:")
