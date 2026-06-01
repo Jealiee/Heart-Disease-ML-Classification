@@ -33,21 +33,6 @@ def clean_data(df, only_cleveland=False):
     df["exang"] = (
         df["exang"].astype(str).str.strip().str.lower().map({"true": 1, "false": 0})
     )
-    cols_to_fix = ["trestbps", "chol"]
-
-    for col in cols_to_fix:
-        q1 = df[col].quantile(0.25)
-        q3 = df[col].quantile(0.75)
-        iqr = q3 - q1
-        upper_limit = q3 + 1.5 * iqr
-        lower_limit = q1 - 1.5 * iqr
-
-        # Cap the values
-        df[col] = np.where(
-            df[col] > upper_limit,
-            upper_limit,
-            np.where(df[col] < lower_limit, lower_limit, df[col]),
-        )
 
     df["num"] = (df["num"] > 0).astype(int)
 
@@ -107,6 +92,41 @@ def preprocess_fold(X_train, X_val):
         median = X_train_processed[col].median()
         X_train_processed[col] = X_train_processed[col].fillna(median)
         X_val_processed[col] = X_val_processed[col].fillna(median)
+
+    # Winsorization 
+    cols_to_fix = ["trestbps", "chol"]
+
+    for col in cols_to_fix:
+        if col not in X_train_processed.columns:
+            continue
+
+        q1 = X_train_processed[col].quantile(0.25)
+        q3 = X_train_processed[col].quantile(0.75)
+
+        iqr = q3 - q1
+
+        upper_limit = q3 + 1.5 * iqr
+        lower_limit = q1 - 1.5 * iqr
+
+        X_train_processed[col] = np.where(
+            X_train_processed[col] > upper_limit,
+            upper_limit,
+            np.where(
+                X_train_processed[col] < lower_limit,
+                lower_limit,
+                X_train_processed[col],
+            ),
+        )
+
+        X_val_processed[col] = np.where(
+            X_val_processed[col] > upper_limit,
+            upper_limit,
+            np.where(
+                X_val_processed[col] < lower_limit,
+                lower_limit,
+                X_val_processed[col],
+            ),
+        )
 
     # Scale numerical values
     scaler = RobustScaler()
