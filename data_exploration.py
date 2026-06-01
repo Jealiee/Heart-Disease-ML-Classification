@@ -37,7 +37,34 @@ def explore_data(df, target):
     overall_missing_pct = (total_missing / total_values) * 100
 
     print("\n" + "=" * 60)
+    print("Overall missing values per class (num)")
+
+    for cls in sorted(df["num"].unique()):
+        subset = df[df["num"] == cls]
+
+        class_missing = subset.isnull().sum().sum()
+        class_total = subset.shape[0] * subset.shape[1]
+
+        class_missing_pct = (class_missing / class_total) * 100
+
+        print(f"Class {cls}: {class_missing_pct:.2f}%")
+
+    print("\n" + "=" * 60)
     print(f"Overall missing values: {overall_missing_pct:.2f}%")
+
+    print("\n" + "=" * 60)
+    print("Missing values % per column by class (num)")
+
+    for col in df.columns:
+        if col == "num":
+            continue
+
+        print(f"\nColumn: {col}")
+
+        for cls in sorted(df["num"].unique()):
+            subset = df[df["num"] == cls]
+            missing_pct = subset[col].isna().mean() * 100
+            print(f"  Class {cls}: {missing_pct:.2f}%")
 
     print("\n" + "=" * 60)
     print("Duplicate rows:")
