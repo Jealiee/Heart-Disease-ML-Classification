@@ -27,7 +27,7 @@ from explainability import (
 FILE_PATH = Path("heart_disease_uci.csv")
 
 # Change this manually depending on experiment
-RESULTS_FOLDER = Path("results_cleveland_unbalanced")
+RESULTS_FOLDER = Path("results_raw_cut_balanced")
 RESULTS_FOLDER.mkdir(exist_ok=True)
 
 df = pd.read_csv(FILE_PATH)
@@ -39,8 +39,8 @@ if __name__ == "__main__":
     ######### Data exploration and cleaning ###########
 
     # IMPORTANT! Make sure only 1 is uncommented before running the script
-    #df_clean = clean_data(df, only_cleveland=False)
-    df_clean = clean_data(df, only_cleveland=True)
+    df_clean = clean_data(df, only_cleveland=False)
+    #df_clean = clean_data(df, only_cleveland=True)
 
     # explore_data(df, target)
     # explore_data(df_clean, target)
@@ -115,7 +115,6 @@ if __name__ == "__main__":
         "Random Forest",
         save_folder=RESULTS_FOLDER
     )
-
     ######### Explainability / XAI ###########
 
     x_processed, _ = preprocess_fold(x, x)
@@ -124,30 +123,39 @@ if __name__ == "__main__":
     final_log_model = logistic_model()
     final_log_model.fit(x_processed, y)
 
-    plot_logistic_coefficients(final_log_model, x_processed.columns)
-    plt.savefig(RESULTS_FOLDER / "logistic_coefficients.png", dpi=300, bbox_inches="tight")
-    plt.close()
+    plot_logistic_coefficients(
+        final_log_model,
+        x_processed.columns,
+        save_path=RESULTS_FOLDER / "logistic_coefficients.png"
+    )
 
-    plot_permutation_importance(final_log_model, x_processed, y)
-    plt.savefig(RESULTS_FOLDER / "logistic_permutation_importance.png", dpi=300, bbox_inches="tight")
-    plt.close()
+    plot_permutation_importance(
+        final_log_model,
+        x_processed,
+        y,
+        save_path=RESULTS_FOLDER / "logistic_permutation_importance.png"
+    )
 
     # Random Forest explainability
     final_forest_model = random_forest()
     final_forest_model.fit(x_processed, y)
 
-    plot_feature_importance(final_forest_model, x_processed.columns)
-    plt.savefig(RESULTS_FOLDER / "random_forest_feature_importance.png", dpi=300, bbox_inches="tight")
-    plt.close()
+    plot_feature_importance(
+        final_forest_model,
+        x_processed.columns,
+        save_path=RESULTS_FOLDER / "random_forest_feature_importance.png"
+    )
 
-    plot_permutation_importance(final_forest_model, x_processed, y)
-    plt.savefig(RESULTS_FOLDER / "random_forest_permutation_importance.png", dpi=300, bbox_inches="tight")
-    plt.close()
+    plot_permutation_importance(
+        final_forest_model,
+        x_processed,
+        y,
+        save_path=RESULTS_FOLDER / "random_forest_permutation_importance.png"
+    )
 
     # SHAP explanation for Random Forest
     shap_explain_tree(
         final_forest_model,
-        x_processed.sample(100, random_state=42)
+        x_processed.sample(100, random_state=42),
+        save_folder=RESULTS_FOLDER
     )
-
-    print(f"\nAll results saved in folder: {RESULTS_FOLDER}")
