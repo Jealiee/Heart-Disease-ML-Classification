@@ -1,160 +1,236 @@
-from sklearn.model_selection import StratifiedKFold
+from pathlib import Path
+import json
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.base import clone
+from sklearn.model_selection import StratifiedKFold, train_test_split, ParameterGrid
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
     recall_score,
     f1_score,
-    confusion_matrix,
     roc_auc_score,
-    roc_curve,
-    ConfusionMatrixDisplay
+    confusion_matrix,
+    classification_report,
+    ConfusionMatrixDisplay,
+    RocCurveDisplay,
+    PrecisionRecallDisplay,
 )
-from sklearn.base import clone
+from sklearn.inspection import permutation_importance
+from scipy.stats import wilcoxon, ttest_rel
+
 from preprocessing import preprocess_fold
 
-import matplotlib.pyplot as plt
-import numpy as np
+
+METRICS = ["accuracy", "precision", "recall", "f1", "roc_auc"]
 
 
-def run_stratified_cv(model, x, y, n_splits=5):
+def _predict_scores(model, X):
+    """Return probability-like score for ROC/PR curves."""
+    if hasattr(model, "predict_proba"):
+        return model.predict_proba(X)[:, 1]
+    if hasattr(model, "decision_function"):
+        return model.decision_function(X)
+    return model.predict(X)
 
+
+def compute_metrics(y_true, y_pred, y_score=None):
+    results = {
+        "accuracy": accuracy_score(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred, zero_division=0),
+        "recall": recall_score(y_true, y_pred, zero_division=0),
+        "f1": f1_score(y_true, y_pred, zero_division=0),
+    }
+    if y_score is not None and len(np.unique(y_true)) == 2:
+        results["roc_auc"] = roc_auc_score(y_true, y_score)
+    else:
+        results["roc_auc"] = np.nan
+    return results
+
+
+def run_stratified_cv(model, X, y, n_splits=5):
+    """Cross-validation with preprocessing fitted only inside each fold."""
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    scores = {m: [] for m in METRICS}
 
-    acc_scores = []
-    prec_scores = []
-    rec_scores = []
-    f1_scores = []
-    auc_scores = []
-
-    all_y_true = []
-    all_y_pred = []
-    all_y_proba = []
-
-    for fold, (train_idx, val_idx) in enumerate(skf.split(x, y), start=1):
-        x_train, x_val = x.iloc[train_idx], x.iloc[val_idx]
+    for train_idx, val_idx in skf.split(X, y):
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-        x_train_p, x_val_p = preprocess_fold(x_train, x_val)
+        X_train_p, X_val_p = preprocess_fold(X_train, X_val)
 
         model_clone = clone(model)
-        model_clone.fit(x_train_p, y_train)
+        model_clone.fit(X_train_p, y_train)
 
-        y_pred = model_clone.predict(x_val_p)
+        y_pred = model_clone.predict(X_val_p)
+        y_score = _predict_scores(model_clone, X_val_p)
+        fold_scores = compute_metrics(y_val, y_pred, y_score)
 
-        if hasattr(model_clone, "predict_proba"):
-            y_proba = model_clone.predict_proba(x_val_p)[:, 1]
-        else:
-            y_proba = model_clone.decision_function(x_val_p)
+        for metric in METRICS:
+            scores[metric].append(fold_scores[metric])
 
-        cm = confusion_matrix(y_val, y_pred)
-        print(f"\nFold {fold} confusion matrix:")
-        print(cm)
+    return scores
 
-        acc_scores.append(accuracy_score(y_val, y_pred))
-        prec_scores.append(precision_score(y_val, y_pred, average="macro"))
-        rec_scores.append(recall_score(y_val, y_pred, average="macro"))
-        f1_scores.append(f1_score(y_val, y_pred, average="macro"))
-        auc_scores.append(roc_auc_score(y_val, y_proba))
 
-        all_y_true.extend(y_val)
-        all_y_pred.extend(y_pred)
-        all_y_proba.extend(y_proba)
+def tune_model_grid(model, param_grid, X, y, n_splits=5, scoring="f1"):
+    """
+    Automatic grid search. It is intentionally implemented with our custom
+    preprocess_fold function so preprocessing is learned only from training folds.
+    """
+    rows = []
+    best_score = -np.inf
+    best_params = None
+    best_cv_scores = None
+
+    for params in ParameterGrid(param_grid):
+        candidate = clone(model).set_params(**params)
+        cv_scores = run_stratified_cv(candidate, X, y, n_splits=n_splits)
+        mean_score = float(np.mean(cv_scores[scoring]))
+        std_score = float(np.std(cv_scores[scoring]))
+
+        row = {"params": params, f"mean_{scoring}": mean_score, f"std_{scoring}": std_score}
+        for metric in METRICS:
+            row[f"mean_{metric}"] = float(np.mean(cv_scores[metric]))
+            row[f"std_{metric}"] = float(np.std(cv_scores[metric]))
+        rows.append(row)
+
+        if mean_score > best_score:
+            best_score = mean_score
+            best_params = params
+            best_cv_scores = cv_scores
+
+    search_results = pd.DataFrame(rows).sort_values(f"mean_{scoring}", ascending=False)
+    best_model = clone(model).set_params(**best_params)
 
     return {
-        "accuracy": acc_scores,
-        "precision": prec_scores,
-        "recall": rec_scores,
-        "f1": f1_scores,
-        "auc": auc_scores,
-        "y_true": np.array(all_y_true),
-        "y_pred": np.array(all_y_pred),
-        "y_proba": np.array(all_y_proba),
+        "best_model": best_model,
+        "best_params": best_params,
+        "best_score": best_score,
+        "best_cv_scores": best_cv_scores,
+        "search_results": search_results,
     }
 
 
-def plot_results(results_dict, save_folder=None):
+def train_and_evaluate_final(model, X, y, output_dir, test_size=0.2):
+    """Final hold-out test evaluation after hyperparameter selection."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics = ["accuracy", "precision", "recall", "f1", "auc"]
-
-    for metric in metrics:
-        plt.figure(figsize=(8, 5))
-
-        model_names = []
-        means = []
-        stds = []
-
-        for model_name, results in results_dict.items():
-            values = results[metric]
-            model_names.append(model_name)
-            means.append(np.mean(values))
-            stds.append(np.std(values))
-
-        x = np.arange(len(model_names))
-
-        plt.bar(x, means, yerr=stds, capsize=5)
-
-        for i, v in enumerate(means):
-            plt.text(i, v + 0.01, f"{v:.2f}", ha="center")
-
-        plt.xticks(x, model_names, rotation=20)
-        plt.title(f"{metric.upper()} Comparison")
-        plt.ylabel(metric)
-        plt.ylim(0, 1)
-        plt.tight_layout()
-        if save_folder is not None:
-           plt.savefig(save_folder / f"{metric}_comparison.png", dpi=300, bbox_inches="tight")
-        plt.show()
-
-
-def plot_roc_curves(results_dict, save_folder=None):
-
-    plt.figure(figsize=(8, 6))
-
-    for model_name, results in results_dict.items():
-        fpr, tpr, _ = roc_curve(results["y_true"], results["y_proba"])
-        auc_value = roc_auc_score(results["y_true"], results["y_proba"])
-
-        plt.plot(fpr, tpr, label=f"{model_name} AUC = {auc_value:.2f}")
-
-    plt.plot([0, 1], [0, 1], linestyle="--", label="Random classifier")
-
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title("ROC Curves")
-    plt.legend()
-    plt.tight_layout()
-    if save_folder is not None:
-       plt.savefig(save_folder / "roc_curves.png", dpi=300, bbox_inches="tight")
-    plt.show()
-
-
-def plot_combined_confusion_matrix(results, model_name, save_folder=None):
-
-    cm = confusion_matrix(results["y_true"], results["y_pred"])
-
-    disp = ConfusionMatrixDisplay(
-        confusion_matrix=cm,
-        display_labels=["Healthy", "Heart disease"]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=y
     )
 
-    disp.plot()
-    plt.title(f"{model_name} Combined Confusion Matrix")
-    plt.tight_layout()
-    if save_folder is not None:
-       filename = model_name.lower().replace(" ", "_") + "_confusion_matrix.png"
-       plt.savefig(save_folder / filename, dpi=300, bbox_inches="tight")
-    plt.show()
+    X_train_p, X_test_p = preprocess_fold(X_train, X_test)
+    final_model = clone(model)
+    final_model.fit(X_train_p, y_train)
+
+    y_pred = final_model.predict(X_test_p)
+    y_score = _predict_scores(final_model, X_test_p)
+    metrics = compute_metrics(y_test, y_pred, y_score)
+
+    cm = confusion_matrix(y_test, y_pred)
+    report = classification_report(y_test, y_pred, zero_division=0)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ConfusionMatrixDisplay(cm, display_labels=["No disease", "Disease"]).plot(ax=ax, values_format="d")
+    ax.set_title("Final Test Confusion Matrix")
+    fig.tight_layout()
+    fig.savefig(output_dir / "confusion_matrix_final_test.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    RocCurveDisplay.from_predictions(y_test, y_score, ax=ax)
+    ax.set_title("Final Test ROC Curve")
+    fig.tight_layout()
+    fig.savefig(output_dir / "roc_curve_final_test.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    PrecisionRecallDisplay.from_predictions(y_test, y_score, ax=ax)
+    ax.set_title("Final Test Precision-Recall Curve")
+    fig.tight_layout()
+    fig.savefig(output_dir / "precision_recall_curve_final_test.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    return {
+        "model": final_model,
+        "X_train_processed": X_train_p,
+        "X_test_processed": X_test_p,
+        "y_train": y_train,
+        "y_test": y_test,
+        "y_pred": y_pred,
+        "y_score": y_score,
+        "metrics": metrics,
+        "confusion_matrix": cm,
+        "classification_report": report,
+    }
 
 
-def print_summary_table(results_dict):
+def compare_models_statistically(cv_scores_a, cv_scores_b, model_a, model_b, metric="f1"):
+    """Paired statistical comparison using the same CV folds."""
+    a = np.array(cv_scores_a[metric], dtype=float)
+    b = np.array(cv_scores_b[metric], dtype=float)
 
-    print("\nFinal summary: mean ± std")
-    print("-" * 80)
+    result = {
+        "metric": metric,
+        "model_a": model_a,
+        "model_b": model_b,
+        f"{model_a}_mean": float(np.mean(a)),
+        f"{model_b}_mean": float(np.mean(b)),
+    }
 
-    metrics = ["accuracy", "precision", "recall", "f1", "auc"]
+    try:
+        stat, p = wilcoxon(a, b, zero_method="wilcox", alternative="two-sided")
+        result["wilcoxon_statistic"] = float(stat)
+        result["wilcoxon_p_value"] = float(p)
+    except ValueError:
+        result["wilcoxon_statistic"] = None
+        result["wilcoxon_p_value"] = None
 
-    for model_name, results in results_dict.items():
-        print(f"\n{model_name}")
-        for metric in metrics:
-            values = results[metric]
-            print(f"{metric}: {np.mean(values):.3f} ± {np.std(values):.3f}")
+    stat_t, p_t = ttest_rel(a, b)
+    result["paired_t_statistic"] = float(stat_t)
+    result["paired_t_p_value"] = float(p_t)
+    return result
+
+
+def plot_cv_comparison(results_dict, output_dir):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_rows = []
+    for model_name, scores in results_dict.items():
+        row = {"model": model_name}
+        for metric in METRICS:
+            row[f"{metric}_mean"] = float(np.mean(scores[metric]))
+            row[f"{metric}_std"] = float(np.std(scores[metric]))
+        summary_rows.append(row)
+    summary = pd.DataFrame(summary_rows)
+    summary.to_csv(output_dir / "cv_summary.csv", index=False)
+
+    for metric in METRICS:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        labels = list(results_dict.keys())
+        values = [results_dict[name][metric] for name in labels]
+        ax.boxplot(values, labels=labels)
+        ax.set_title(f"Cross-validated {metric} across models")
+        ax.set_ylabel(metric)
+        ax.tick_params(axis="x", rotation=20)
+        fig.tight_layout()
+        fig.savefig(output_dir / f"cv_{metric}_boxplot.png", dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    return summary
+
+
+def save_json(data, path):
+    def default(o):
+        if isinstance(o, (np.integer, np.floating)):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return str(o)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, default=default)
