@@ -1,161 +1,166 @@
-import json
 from pathlib import Path
-
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
-from data_exploration import explore_data
-from preprocessing import clean_data, preprocess_fold
-from models import logistic_model, decision_tree, random_forest
+from preprocessing import clean_data
+from models import logistic_model, decision_tree, random_forest, PARAM_GRIDS
 from evaluation import (
-    run_stratified_cv,
-    plot_results,
-    plot_roc_curves,
-    plot_combined_confusion_matrix,
-    print_summary_table
+    tune_model_grid,
+    train_and_evaluate_final,
+    compare_models_statistically,
+    plot_cv_comparison,
+    save_json,
 )
 from explainability import (
-    plot_feature_importance,
-    shap_explain_tree,
-    plot_logistic_coefficients,
-    plot_permutation_importance
+    plot_model_importance,
+    plot_permutation_importance,
+    plot_shap_explanations,
+    plot_local_explanation,
 )
 
+BASE_DIR = Path(__file__).resolve().parent
+FILE_PATH = BASE_DIR / "heart_disease_uci.csv"
+TARGET = "num"
+OUTPUT_DIR = BASE_DIR / "outputs"
 
-# Put the csv file path here
-FILE_PATH = Path("heart_disease_uci.csv")
+DATASET_VARIANTS = {
+    "full_cut_features": False,
+    "cleveland_all_features": True,
+}
+BALANCING_VARIANTS = {
+    "unbalanced": None,
+    "balanced": "balanced",
+}
 
-# Change this manually depending on experiment
-RESULTS_FOLDER = Path("results_raw_cut_balanced")
-RESULTS_FOLDER.mkdir(exist_ok=True)
 
-df = pd.read_csv(FILE_PATH)
-target = "num"
+def build_models(class_weight):
+    return {
+        "Logistic Regression": logistic_model(class_weight=class_weight),
+        "Decision Tree": decision_tree(class_weight=class_weight),
+        "Random Forest": random_forest(class_weight=class_weight),
+    }
+
+
+def run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weight):
+    experiment_name = f"{dataset_name}_{balancing_name}"
+    run_dir = OUTPUT_DIR / experiment_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    df_clean = clean_data(df, only_cleveland=only_cleveland)
+    X = df_clean.drop(columns=[TARGET])
+    y = df_clean[TARGET]
+
+    n_splits = 5
+    scoring = "f1"
+    model_builders = build_models(class_weight=class_weight)
+
+    searches = {}
+    cv_results = {}
+
+    print(f"\n================ EXPERIMENT: {experiment_name} ================", flush=True)
+    print(f"Samples: {len(df_clean)}, Features before encoding: {X.shape[1]}", flush=True)
+
+    for model_name, model in model_builders.items():
+        print(f"Tuning {model_name}...", flush=True)
+        search = tune_model_grid(
+            model=model,
+            param_grid=PARAM_GRIDS[model_name],
+            X=X,
+            y=y,
+            n_splits=n_splits,
+            scoring=scoring,
+        )
+        searches[model_name] = search
+        cv_results[model_name] = search["best_cv_scores"]
+        search["search_results"].to_csv(
+            run_dir / f"{model_name.lower().replace(' ', '_')}_grid_search_results.csv",
+            index=False,
+        )
+        print(f"  best {scoring}: {search['best_score']:.4f}; params: {search['best_params']}", flush=True)
+
+    cv_summary = plot_cv_comparison(cv_results, run_dir)
+    cv_summary.insert(0, "experiment", experiment_name)
+    cv_summary.to_csv(run_dir / "cv_summary.csv", index=False)
+
+    stats_lr_rf = compare_models_statistically(
+        cv_results["Logistic Regression"],
+        cv_results["Random Forest"],
+        "Logistic Regression",
+        "Random Forest",
+        metric=scoring,
+    )
+    save_json(stats_lr_rf, run_dir / "statistical_test_logistic_vs_random_forest.json")
+
+    best_model_name = max(searches, key=lambda name: searches[name]["best_score"])
+    best_model = searches[best_model_name]["best_model"]
+    best_params = searches[best_model_name]["best_params"]
+
+    final = train_and_evaluate_final(best_model, X, y, run_dir, test_size=0.2)
+    save_json(final["metrics"], run_dir / "final_test_metrics.json")
+
+    # Fast explainability generated for every experiment.
+    plot_model_importance(final["model"], final["X_test_processed"].columns, run_dir, best_model_name)
+    plot_permutation_importance(
+        final["model"], final["X_test_processed"], final["y_test"], run_dir, best_model_name, scoring=scoring, n_repeats=5
+    )
+    plot_local_explanation(
+        final["model"], final["X_test_processed"], final["y_test"], final["y_pred"], run_dir, best_model_name
+    )
+
+    experiment_summary = {
+        "experiment": experiment_name,
+        "dataset_name": dataset_name,
+        "balancing": balancing_name,
+        "n_samples": int(len(df_clean)),
+        "n_features_before_encoding": int(X.shape[1]),
+        "class_0_fraction": float((y == 0).mean()),
+        "class_1_fraction": float((y == 1).mean()),
+        "selected_model": best_model_name,
+        "best_params": best_params,
+        "best_cv_f1": float(searches[best_model_name]["best_score"]),
+        **{f"test_{k}": float(v) for k, v in final["metrics"].items()},
+    }
+    save_json(experiment_summary, run_dir / "experiment_summary.json")
+    print(f"Selected final model: {best_model_name}; test F1={final['metrics']['f1']:.4f}", flush=True)
+
+    explainability_payload = {
+        "model": final["model"],
+        "X_test_processed": final["X_test_processed"],
+        "run_dir": run_dir,
+        "model_name": best_model_name,
+    }
+    return experiment_summary, explainability_payload
+
+
+def main():
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    df = pd.read_csv(FILE_PATH)
+    all_summaries = []
+    explanation_payloads = {}
+
+    for dataset_name, only_cleveland in DATASET_VARIANTS.items():
+        for balancing_name, class_weight in BALANCING_VARIANTS.items():
+            summary, payload = run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weight)
+            all_summaries.append(summary)
+            explanation_payloads[summary["experiment"]] = payload
+
+    summary_df = pd.DataFrame(all_summaries)
+    summary_df.to_csv(OUTPUT_DIR / "all_experiments_summary.csv", index=False)
+
+    # SHAP is slower, so create it only for the best overall experiment.
+    best_row = summary_df.sort_values("test_f1", ascending=False).iloc[0]
+    best_payload = explanation_payloads[best_row["experiment"]]
+    X_shap = best_payload["X_test_processed"].sample(
+        min(100, len(best_payload["X_test_processed"])), random_state=42
+    )
+    plot_shap_explanations(
+        best_payload["model"], X_shap, best_payload["run_dir"], best_payload["model_name"]
+    )
+
+    print("\n================ ALL EXPERIMENTS SUMMARY ================")
+    print(summary_df)
+    print(f"\nBest overall experiment for report figures: {best_row['experiment']}")
+    print(f"All outputs saved in: {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
-
-    ######### Data exploration and cleaning ###########
-
-    # IMPORTANT! Make sure only 1 is uncommented before running the script
-    df_clean = clean_data(df, only_cleveland=False)
-    #df_clean = clean_data(df, only_cleveland=True)
-
-    # explore_data(df, target)
-    # explore_data(df_clean, target)
-
-    ######### Get models ###########
-
-    log_model = logistic_model()
-    tree_model = decision_tree()
-    forest_model = random_forest()
-
-    ######### Run training ###########
-
-    x = df_clean.drop(columns=[target])
-    y = df_clean[target]
-
-    n_splits = 5
-
-    results_log = run_stratified_cv(log_model, x, y, n_splits)
-    results_tree = run_stratified_cv(tree_model, x, y, n_splits)
-    results_forest = run_stratified_cv(forest_model, x, y, n_splits)
-
-    results_all = {
-        "Logistic Regression": results_log,
-        "Decision Tree": results_tree,
-        "Random Forest": results_forest
-    }
-
-    print("\nLogistic Regression:", results_log)
-    print("\nDecision Tree:", results_tree)
-    print("\nRandom Forest:", results_forest)
-
-    ######### Save raw results ###########
-
-    serializable_results = {}
-
-    for model_name, results in results_all.items():
-        serializable_results[model_name] = {
-            key: value.tolist() if hasattr(value, "tolist") else value
-            for key, value in results.items()
-        }
-
-    with open(RESULTS_FOLDER / "results.json", "w") as f:
-        json.dump(serializable_results, f, indent=4)
-
-    with open(RESULTS_FOLDER / "summary.txt", "w") as f:
-        for model_name, results in results_all.items():
-            f.write(f"\n{model_name}\n")
-            for metric in ["accuracy", "precision", "recall", "f1", "auc"]:
-                values = results[metric]
-                f.write(f"{metric}: {np.mean(values):.3f} ± {np.std(values):.3f}\n")
-
-    ######### Visualize and save evaluation results ###########
-
-    plot_results(results_all, save_folder=RESULTS_FOLDER)
-    print_summary_table(results_all)
-    plot_roc_curves(results_all, save_folder=RESULTS_FOLDER)
-
-    plot_combined_confusion_matrix(
-        results_log,
-        "Logistic Regression",
-        save_folder=RESULTS_FOLDER
-    )
-
-    plot_combined_confusion_matrix(
-        results_tree,
-        "Decision Tree",
-        save_folder=RESULTS_FOLDER
-    )
-
-    plot_combined_confusion_matrix(
-        results_forest,
-        "Random Forest",
-        save_folder=RESULTS_FOLDER
-    )
-    ######### Explainability / XAI ###########
-
-    x_processed, _ = preprocess_fold(x, x)
-
-    # Logistic Regression explainability
-    final_log_model = logistic_model()
-    final_log_model.fit(x_processed, y)
-
-    plot_logistic_coefficients(
-        final_log_model,
-        x_processed.columns,
-        save_path=RESULTS_FOLDER / "logistic_coefficients.png"
-    )
-
-    plot_permutation_importance(
-        final_log_model,
-        x_processed,
-        y,
-        save_path=RESULTS_FOLDER / "logistic_permutation_importance.png"
-    )
-
-    # Random Forest explainability
-    final_forest_model = random_forest()
-    final_forest_model.fit(x_processed, y)
-
-    plot_feature_importance(
-        final_forest_model,
-        x_processed.columns,
-        save_path=RESULTS_FOLDER / "random_forest_feature_importance.png"
-    )
-
-    plot_permutation_importance(
-        final_forest_model,
-        x_processed,
-        y,
-        save_path=RESULTS_FOLDER / "random_forest_permutation_importance.png"
-    )
-
-    # SHAP explanation for Random Forest
-    shap_explain_tree(
-        final_forest_model,
-        x_processed.sample(100, random_state=42),
-        save_folder=RESULTS_FOLDER
-    )
+    main()
