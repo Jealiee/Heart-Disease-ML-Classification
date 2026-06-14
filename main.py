@@ -57,7 +57,7 @@ def run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weigh
     searches = {}
     cv_results = {}
 
-    print(f"EXPERIMENT: {experiment_name} ", flush=True)
+    print(f" EXPERIMENT: {experiment_name}", flush=True)
     print(f"Samples: {len(df_clean)}, Features before encoding: {X.shape[1]}", flush=True)
 
     for model_name, model in model_builders.items():
@@ -137,7 +137,7 @@ def run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weigh
         "run_dir": run_dir,
         "model_name": best_model_name,
     }
-    return experiment_summary, explainability_payload
+    return experiment_summary, explainability_payload, cv_results
 
 
 def main():
@@ -145,17 +145,55 @@ def main():
     df = pd.read_csv(FILE_PATH)
     all_summaries = []
     explanation_payloads = {}
+    all_cv_results = {}
 
     for dataset_name, only_cleveland in DATASET_VARIANTS.items():
         for balancing_name, class_weight in BALANCING_VARIANTS.items():
-            summary, payload = run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weight)
+            summary, payload, cv_results = run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weight)
             all_summaries.append(summary)
             explanation_payloads[summary["experiment"]] = payload
+            all_cv_results[summary["experiment"]] = cv_results
 
     summary_df = pd.DataFrame(all_summaries)
     summary_df.to_csv(OUTPUT_DIR / "all_experiments_summary.csv", index=False)
 
+    extra_tests = []
+
+    
+    extra_tests.append(
+        compare_models_statistically(
+            all_cv_results["full_cut_features_unbalanced"]["Random Forest"],
+            all_cv_results["full_cut_features_balanced"]["Random Forest"],
+            "Full_unbalanced_RF",
+            "Full_balanced_RF",
+            metric="f1",
+        )
+    )
+
    
+    extra_tests.append(
+        compare_models_statistically(
+            all_cv_results["cleveland_all_features_unbalanced"]["Logistic Regression"],
+            all_cv_results["cleveland_all_features_balanced"]["Logistic Regression"],
+            "Cleveland_unbalanced_LR",
+            "Cleveland_balanced_LR",
+            metric="f1",
+        )
+    )
+
+
+    extra_tests.append(
+        compare_models_statistically(
+            all_cv_results["cleveland_all_features_unbalanced"]["Logistic Regression"],
+            all_cv_results["full_cut_features_unbalanced"]["Random Forest"],
+            "Cleveland_unbalanced_LR",
+            "Full_unbalanced_RF",
+            metric="f1",
+        )
+    )
+
+    extra_tests_df = pd.DataFrame(extra_tests)
+    extra_tests_df.to_csv(OUTPUT_DIR / "additional_statistical_tests.csv", index=False)
     best_row = summary_df.sort_values("final_cv_f1", ascending=False).iloc[0]
     best_payload = explanation_payloads[best_row["experiment"]]
     X_shap = best_payload["X_test_processed"].sample(
