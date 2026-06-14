@@ -15,6 +15,7 @@ from explainability import (
     plot_permutation_importance,
     plot_shap_explanations,
     plot_local_explanation,
+    plot_error_case_explanations,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -56,7 +57,7 @@ def run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weigh
     searches = {}
     cv_results = {}
 
-    print(f"\n================ EXPERIMENT: {experiment_name} ================", flush=True)
+    print(f"EXPERIMENT: {experiment_name} ", flush=True)
     print(f"Samples: {len(df_clean)}, Features before encoding: {X.shape[1]}", flush=True)
 
     for model_name, model in model_builders.items():
@@ -94,16 +95,24 @@ def run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weigh
     best_model = searches[best_model_name]["best_model"]
     best_params = searches[best_model_name]["best_params"]
 
-    final = train_and_evaluate_final(best_model, X, y, run_dir, test_size=0.2)
-    save_json(final["metrics"], run_dir / "final_test_metrics.json")
+    final = train_and_evaluate_final(best_model, X, y, run_dir, n_splits=5)
+    save_json(final["metrics"], run_dir / "final_cv_metrics.json")
 
-    # Fast explainability generated for every experiment.
+  
     plot_model_importance(final["model"], final["X_test_processed"].columns, run_dir, best_model_name)
     plot_permutation_importance(
         final["model"], final["X_test_processed"], final["y_test"], run_dir, best_model_name, scoring=scoring, n_repeats=5
     )
     plot_local_explanation(
         final["model"], final["X_test_processed"], final["y_test"], final["y_pred"], run_dir, best_model_name
+    )
+    plot_error_case_explanations(
+        final["model"],
+        final["X_test_processed"],
+        final["y_test"],
+        final["y_pred"],
+        run_dir,
+        best_model_name
     )
 
     experiment_summary = {
@@ -117,10 +126,10 @@ def run_experiment(df, dataset_name, only_cleveland, balancing_name, class_weigh
         "selected_model": best_model_name,
         "best_params": best_params,
         "best_cv_f1": float(searches[best_model_name]["best_score"]),
-        **{f"test_{k}": float(v) for k, v in final["metrics"].items()},
+        **{f"final_cv_{k}": float(v) for k, v in final["metrics"].items()},
     }
     save_json(experiment_summary, run_dir / "experiment_summary.json")
-    print(f"Selected final model: {best_model_name}; test F1={final['metrics']['f1']:.4f}", flush=True)
+    print(f"Selected final model: {best_model_name}; final CV F1={final['metrics']['f1']:.4f}", flush=True)
 
     explainability_payload = {
         "model": final["model"],
@@ -146,8 +155,8 @@ def main():
     summary_df = pd.DataFrame(all_summaries)
     summary_df.to_csv(OUTPUT_DIR / "all_experiments_summary.csv", index=False)
 
-    # SHAP is slower, so create it only for the best overall experiment.
-    best_row = summary_df.sort_values("test_f1", ascending=False).iloc[0]
+   
+    best_row = summary_df.sort_values("final_cv_f1", ascending=False).iloc[0]
     best_payload = explanation_payloads[best_row["experiment"]]
     X_shap = best_payload["X_test_processed"].sample(
         min(100, len(best_payload["X_test_processed"])), random_state=42
@@ -156,7 +165,7 @@ def main():
         best_payload["model"], X_shap, best_payload["run_dir"], best_payload["model_name"]
     )
 
-    print("\n================ ALL EXPERIMENTS SUMMARY ================")
+    print("ALL EXPERIMENTS SUMMARY")
     print(summary_df)
     print(f"\nBest overall experiment for report figures: {best_row['experiment']}")
     print(f"All outputs saved in: {OUTPUT_DIR}")
