@@ -3,8 +3,6 @@ import pandas as pd
 from sklearn.preprocessing import OneHotEncoder, RobustScaler
 
 
-# Setting only_cleveland as True removes ~60% of the data but all features are preserved.
-# Default value False keeps all records but removes 3 features with >30% missing data.
 def clean_data(df, only_cleveland=False):
     df = df.copy()
     df = df.drop_duplicates()
@@ -16,12 +14,11 @@ def clean_data(df, only_cleveland=False):
 
     df = df.drop(columns=["id", "dataset"])
 
-    # Label invalid values as missing
+   
     df["trestbps"] = df["trestbps"].replace(0, np.nan)
     df["chol"] = df["chol"].replace(0, np.nan)
     df["oldpeak"] = df["oldpeak"].clip(lower=0)
 
-    # Encoding binary values
     df["sex"] = (
         df["sex"].astype(str).str.strip().str.lower().map({"male": 1, "female": 0})
     )
@@ -34,7 +31,6 @@ def clean_data(df, only_cleveland=False):
         df["exang"].astype(str).str.strip().str.lower().map({"true": 1, "false": 0})
     )
 
-    # Convert multiclass target into binary target
     df["num"] = (df["num"] > 0).astype(int)
 
     return df
@@ -53,14 +49,13 @@ def preprocess_fold(X_train, X_val):
     cat_cols = ["cp", "restecg", "slope", "thal"]
     cat_cols = [c for c in cat_cols if c in X_train_processed.columns]
 
-    # Impute missing binary values with most frequent class from training fold only
     for col in ["fbs", "exang"]:
         if col in X_train_processed.columns:
             mode_value = X_train_processed[col].mode()[0]
             X_train_processed[col] = X_train_processed[col].fillna(mode_value)
             X_val_processed[col] = X_val_processed[col].fillna(mode_value)
 
-    # One-hot encode categorical variables using training fold only
+   
     if len(cat_cols) > 0:
         encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
 
@@ -85,13 +80,11 @@ def preprocess_fold(X_train, X_val):
         X_train_processed = pd.concat([X_train_processed, train_encoded], axis=1)
         X_val_processed = pd.concat([X_val_processed, val_encoded], axis=1)
 
-    # Median imputation for numerical variables using training fold only
     for col in num_cols:
         median = X_train_processed[col].median()
         X_train_processed[col] = X_train_processed[col].fillna(median)
         X_val_processed[col] = X_val_processed[col].fillna(median)
 
-    # Winsorization using training fold limits only
     cols_to_fix = ["trestbps", "chol"]
 
     for col in cols_to_fix:
@@ -125,7 +118,6 @@ def preprocess_fold(X_train, X_val):
             ),
         )
 
-    # Scale numerical values using training fold only
     scaler = RobustScaler()
     X_train_processed[num_cols] = scaler.fit_transform(X_train_processed[num_cols])
     X_val_processed[num_cols] = scaler.transform(X_val_processed[num_cols])
