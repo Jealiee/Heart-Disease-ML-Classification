@@ -17,7 +17,7 @@ def _save_barh(df, value_col, title, filename, top_n=15):
 
 
 def plot_model_importance(model, feature_names, output_dir, model_name="model", top_n=15):
-    """Native importance for tree models or coefficients for logistic regression."""
+    
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -62,7 +62,7 @@ def plot_permutation_importance(model, X_test, y_test, output_dir, model_name="m
 
 
 def plot_shap_explanations(model, X_sample, output_dir, model_name="model", max_display=15):
-    """Create SHAP global summary and one local waterfall plot when SHAP works."""
+    
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,7 +97,7 @@ def plot_shap_explanations(model, X_sample, output_dir, model_name="model", max_
             shap_df = pd.DataFrame({"feature": X_sample.columns, "mean_abs_shap": mean_abs}).sort_values("mean_abs_shap", ascending=False)
             shap_df.to_csv(output_dir / f"{model_name.lower().replace(' ', '_')}_mean_abs_shap.csv", index=False)
 
-            # Local SHAP explanation for the first test sample.
+           
             try:
                 explanation = shap.Explanation(
                     values=shap_to_plot[0],
@@ -121,15 +121,19 @@ def plot_shap_explanations(model, X_sample, output_dir, model_name="model", max_
         return None
 
 def plot_local_linear_contribution(model, X_test, y_test, y_pred, output_dir, model_name="model", sample_position=0, top_n=12):
-    """Local explanation for linear/logistic models: coefficient * feature value contributions."""
     if not hasattr(model, "coef_"):
         return None
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    X_test = X_test.reset_index(drop=True)
+    y_test = pd.Series(y_test).reset_index(drop=True)
+    y_pred = pd.Series(y_pred).reset_index(drop=True)
+
     x = X_test.iloc[sample_position]
     contributions = model.coef_.ravel() * x.values
+
     df = pd.DataFrame({
         "feature": X_test.columns,
         "feature_value": x.values,
@@ -137,30 +141,81 @@ def plot_local_linear_contribution(model, X_test, y_test, y_pred, output_dir, mo
         "abs_contribution": np.abs(contributions),
     }).sort_values("abs_contribution", ascending=False)
 
-    df.to_csv(output_dir / f"{model_name.lower().replace(' ', '_')}_local_explanation_sample.csv", index=False)
+    safe_name = model_name.lower().replace(" ", "_")
+    df.to_csv(output_dir / f"{safe_name}_local_explanation_sample.csv", index=False)
 
     df_plot = df.head(top_n).sort_values("contribution")
+
     fig, ax = plt.subplots(figsize=(9, 6))
     ax.barh(df_plot["feature"], df_plot["contribution"])
     ax.axvline(0, linewidth=1)
     ax.set_title(
         f"{model_name}: local contribution explanation\n"
-        f"True={y_test.iloc[sample_position]}, Predicted={y_pred[sample_position]}"
+        f"True={y_test.iloc[sample_position]}, Predicted={y_pred.iloc[sample_position]}"
     )
     ax.set_xlabel("coefficient × processed feature value")
     fig.tight_layout()
-    fig.savefig(output_dir / f"{model_name.lower().replace(' ', '_')}_local_explanation.png", dpi=300, bbox_inches="tight")
+    fig.savefig(output_dir / f"{safe_name}_local_explanation.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
+
     return df
-
-
-def plot_local_explanation(model, X_test, y_test, y_pred, output_dir, model_name="model", sample_position=0, top_n=12):
-    """Create a local explanation for the selected final model.
-    For Logistic Regression it uses coefficient × value contributions.
-    For tree models the local SHAP waterfall is attempted in plot_shap_explanations.
-    """
+def plot_local_explanation(
+    model,
+    X_test,
+    y_test,
+    y_pred,
+    output_dir,
+    model_name="model",
+    sample_position=0,
+    top_n=12,
+):
     if hasattr(model, "coef_"):
         return plot_local_linear_contribution(
-            model, X_test, y_test, y_pred, output_dir, model_name, sample_position, top_n
+            model,
+            X_test,
+            y_test,
+            y_pred,
+            output_dir,
+            model_name,
+            sample_position,
+            top_n,
         )
+
+    print(f"Local explanation skipped for {model_name}: non-linear model.")
     return None
+
+def plot_error_case_explanations(model, X_processed, y_true, y_pred, output_dir, model_name):
+    output_dir = Path(output_dir)
+    error_dir = output_dir / "error_analysis"
+    error_dir.mkdir(parents=True, exist_ok=True)
+
+    X_processed = X_processed.reset_index(drop=True)
+    y_true = pd.Series(y_true).reset_index(drop=True)
+    y_pred = pd.Series(y_pred).reset_index(drop=True)
+
+    false_positive_idx = y_true[(y_true == 0) & (y_pred == 1)].index
+    false_negative_idx = y_true[(y_true == 1) & (y_pred == 0)].index
+
+    if len(false_positive_idx) > 0:
+        idx = false_positive_idx[0]
+        plot_local_explanation(
+            model,
+            X_processed.iloc[[idx]].reset_index(drop=True),
+            y_true.iloc[[idx]].reset_index(drop=True),
+            y_pred.iloc[[idx]].reset_index(drop=True),
+            error_dir,
+            f"{model_name}_false_positive",
+            sample_position=0
+        )
+
+    if len(false_negative_idx) > 0:
+        idx = false_negative_idx[0]
+        plot_local_explanation(
+            model,
+            X_processed.iloc[[idx]].reset_index(drop=True),
+            y_true.iloc[[idx]].reset_index(drop=True),
+            y_pred.iloc[[idx]].reset_index(drop=True),
+            error_dir,
+            f"{model_name}_false_negative",
+            sample_position=0
+        )
