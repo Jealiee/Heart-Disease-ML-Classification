@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from sklearn.base import clone
-from sklearn.model_selection import StratifiedKFold, train_test_split, ParameterGrid
+from sklearn.model_selection import StratifiedKFold, ParameterGrid
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -18,7 +18,6 @@ from sklearn.metrics import (
     RocCurveDisplay,
     PrecisionRecallDisplay,
 )
-from sklearn.inspection import permutation_importance
 from scipy.stats import wilcoxon, ttest_rel
 
 from preprocessing import preprocess_fold
@@ -28,7 +27,7 @@ METRICS = ["accuracy", "precision", "recall", "f1", "roc_auc"]
 
 
 def _predict_scores(model, X):
-    """Return probability-like score for ROC/PR curves."""
+   
     if hasattr(model, "predict_proba"):
         return model.predict_proba(X)[:, 1]
     if hasattr(model, "decision_function"):
@@ -51,7 +50,7 @@ def compute_metrics(y_true, y_pred, y_score=None):
 
 
 def run_stratified_cv(model, X, y, n_splits=5):
-    """Cross-validation with preprocessing fitted only inside each fold."""
+    
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     scores = {m: [] for m in METRICS}
 
@@ -75,10 +74,7 @@ def run_stratified_cv(model, X, y, n_splits=5):
 
 
 def tune_model_grid(model, param_grid, X, y, n_splits=5, scoring="f1"):
-    """
-    Automatic grid search. It is intentionally implemented with our custom
-    preprocess_fold function so preprocessing is learned only from training folds.
-    """
+   
     rows = []
     best_score = -np.inf
     best_params = None
@@ -113,63 +109,102 @@ def tune_model_grid(model, param_grid, X, y, n_splits=5, scoring="f1"):
     }
 
 
-def train_and_evaluate_final(model, X, y, output_dir, test_size=0.2):
-    """Final hold-out test evaluation after hyperparameter selection."""
+def train_and_evaluate_final(model, X, y, output_dir, n_splits=5):
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
-    )
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    X_train_p, X_test_p = preprocess_fold(X_train, X_test)
-    final_model = clone(model)
-    final_model.fit(X_train_p, y_train)
+    all_y_true = []
+    all_y_pred = []
+    all_y_score = []
+    fold_metrics = []
 
-    y_pred = final_model.predict(X_test_p)
-    y_score = _predict_scores(final_model, X_test_p)
-    metrics = compute_metrics(y_test, y_pred, y_score)
+    last_model = None
+    last_X_val_p = None
+    last_y_val = None
+    last_y_pred = None
 
-    cm = confusion_matrix(y_test, y_pred)
-    report = classification_report(y_test, y_pred, zero_division=0)
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X, y), start=1):
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+
+        X_train_p, X_val_p = preprocess_fold(X_train, X_val)
+
+        model_fold = clone(model)
+        model_fold.fit(X_train_p, y_train)
+
+        y_pred = model_fold.predict(X_val_p)
+        y_score = _predict_scores(model_fold, X_val_p)
+
+        fold_score = compute_metrics(y_val, y_pred, y_score)
+        fold_score["fold"] = fold
+        fold_metrics.append(fold_score)
+
+        all_y_true.extend(y_val)
+        all_y_pred.extend(y_pred)
+        all_y_score.extend(y_score)
+
+        last_model = model_fold
+        last_X_val_p = X_val_p
+        last_y_val = y_val
+        last_y_pred = y_pred
+
+    all_y_true = np.array(all_y_true)
+    all_y_pred = np.array(all_y_pred)
+    all_y_score = np.array(all_y_score)
+
+    fold_metrics_df = pd.DataFrame(fold_metrics)
+    fold_metrics_df.to_csv(output_dir / "final_cv_fold_metrics.csv", index=False)
+
+    metrics = {}
+    for metric in METRICS:
+        metrics[metric] = float(fold_metrics_df[metric].mean())
+        metrics[f"{metric}_std"] = float(fold_metrics_df[metric].std())
+
+    cm = confusion_matrix(all_y_true, all_y_pred)
+    report = classification_report(all_y_true, all_y_pred, zero_division=0)
 
     fig, ax = plt.subplots(figsize=(5, 4))
-    ConfusionMatrixDisplay(cm, display_labels=["No disease", "Disease"]).plot(ax=ax, values_format="d")
-    ax.set_title("Final Test Confusion Matrix")
+    ConfusionMatrixDisplay(
+        cm,
+        display_labels=["No disease", "Disease"]
+    ).plot(ax=ax, values_format="d")
+    ax.set_title("Final 5-Fold CV Confusion Matrix")
     fig.tight_layout()
-    fig.savefig(output_dir / "confusion_matrix_final_test.png", dpi=300, bbox_inches="tight")
+    fig.savefig(output_dir / "confusion_matrix_final_cv.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(5, 4))
-    RocCurveDisplay.from_predictions(y_test, y_score, ax=ax)
-    ax.set_title("Final Test ROC Curve")
+    RocCurveDisplay.from_predictions(all_y_true, all_y_score, ax=ax)
+    ax.set_title("Final 5-Fold CV ROC Curve")
     fig.tight_layout()
-    fig.savefig(output_dir / "roc_curve_final_test.png", dpi=300, bbox_inches="tight")
+    fig.savefig(output_dir / "roc_curve_final_cv.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(5, 4))
-    PrecisionRecallDisplay.from_predictions(y_test, y_score, ax=ax)
-    ax.set_title("Final Test Precision-Recall Curve")
+    PrecisionRecallDisplay.from_predictions(all_y_true, all_y_score, ax=ax)
+    ax.set_title("Final 5-Fold CV Precision-Recall Curve")
     fig.tight_layout()
-    fig.savefig(output_dir / "precision_recall_curve_final_test.png", dpi=300, bbox_inches="tight")
+    fig.savefig(output_dir / "precision_recall_curve_final_cv.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
     return {
-        "model": final_model,
-        "X_train_processed": X_train_p,
-        "X_test_processed": X_test_p,
-        "y_train": y_train,
-        "y_test": y_test,
-        "y_pred": y_pred,
-        "y_score": y_score,
+        "model": last_model,
+        "X_test_processed": last_X_val_p,
+        "y_test": last_y_val,
+        "y_pred": last_y_pred,
         "metrics": metrics,
+        "fold_metrics": fold_metrics_df,
         "confusion_matrix": cm,
         "classification_report": report,
+        "all_y_true": all_y_true,
+        "all_y_pred": all_y_pred,
+        "all_y_score": all_y_score,
     }
-
-
 def compare_models_statistically(cv_scores_a, cv_scores_b, model_a, model_b, metric="f1"):
-    """Paired statistical comparison using the same CV folds."""
+    
     a = np.array(cv_scores_a[metric], dtype=float)
     b = np.array(cv_scores_b[metric], dtype=float)
 
