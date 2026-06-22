@@ -1,4 +1,4 @@
-### Project Overview
+## Project Overview
 
 This project uses publicly available heart disease data from Kaggle:
 
@@ -6,7 +6,7 @@ https://www.kaggle.com/datasets/redwankarimsony/heart-disease-data
 
 The project was developed as part of the **Data Mining and Machine Learning** course at the **University of Pisa (2026)**.
 
-### Research Questions
+## Research Questions
 
 The study investigates the following questions:
 
